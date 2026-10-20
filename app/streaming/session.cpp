@@ -2,6 +2,7 @@
 #include "settings/streamingpreferences.h"
 #include "streaming/streamutils.h"
 #include "backend/richpresencemanager.h"
+#include "backend/bitratepolicy.h"
 
 #include <Limelight.h>
 #include "SDL_compat.h"
@@ -658,6 +659,31 @@ bool Session::initialize(QQuickWindow* qtWindow)
     LiInitializeStreamConfiguration(&m_StreamConfig);
     m_StreamConfig.width = m_Preferences->width;
     m_StreamConfig.height = m_Preferences->height;
+    m_StreamConfig.fps = m_Preferences->fps;
+    m_StreamConfig.bitrate = m_Preferences->bitrateKbps;
+
+    if (m_Preferences->nativeResolution || m_Preferences->nativeFps) {
+        const auto current = StreamUtils::getCurrentNativeMode(getDisplayIndex(),
+                                                               m_QtWindow == nullptr ? nullptr : m_QtWindow->screen());
+        const auto resolved = NativeDisplay::resolve({m_StreamConfig.width, m_StreamConfig.height,
+                                                      static_cast<double>(m_StreamConfig.fps)},
+                                                     current, m_Preferences->nativeResolution,
+                                                     m_Preferences->nativeFps);
+        m_StreamConfig.width = resolved.width;
+        m_StreamConfig.height = resolved.height;
+        m_StreamConfig.fps = static_cast<int>(resolved.refreshRate);
+        if (m_Preferences->autoAdjustBitrate) {
+            m_StreamConfig.bitrate = BitratePolicy::clampAutomaticBitrate(
+                StreamingPreferences::getDefaultBitrate(m_StreamConfig.width,
+                                                        m_StreamConfig.height,
+                                                        m_StreamConfig.fps,
+                                                        m_Preferences->enableYUV444),
+                m_Preferences->unlockBitrate);
+        }
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Native preferences resolved to %dx%d at %d FPS; fixed preferences retained",
+                    m_StreamConfig.width, m_StreamConfig.height, m_StreamConfig.fps);
+    }
 
     int x, y, width, height;
     getWindowDimensions(x, y, width, height);
@@ -677,9 +703,6 @@ bool Session::initialize(QQuickWindow* qtWindow)
 
     LiInitializeVideoCallbacks(&m_VideoCallbacks);
     m_VideoCallbacks.setup = drSetup;
-
-    m_StreamConfig.fps = m_Preferences->fps;
-    m_StreamConfig.bitrate = m_Preferences->bitrateKbps;
 
 #ifndef STEAM_LINK
     // Opt-in to all encryption features if we detect that the platform
@@ -1311,8 +1334,7 @@ private:
     Session* m_Session;
 };
 
-void Session::getWindowDimensions(int& x, int& y,
-                                  int& width, int& height)
+int Session::getDisplayIndex()
 {
     int displayIndex = 0;
 
@@ -1359,6 +1381,13 @@ void Session::getWindowDimensions(int& x, int& y,
         }
     }
 
+    return displayIndex;
+}
+
+void Session::getWindowDimensions(int& x, int& y,
+                                  int& width, int& height)
+{
+    int displayIndex = getDisplayIndex();
     SDL_Rect usableBounds;
     if (SDL_GetDisplayUsableBounds(displayIndex, &usableBounds) == 0) {
         // If the stream resolution fits within the usable display area, use it directly
@@ -1658,6 +1687,12 @@ bool Session::startConnectionAsync()
         activeAddressRoute = m_Computer->getActiveAddressRoute();
     }
 
+    m_StreamConfig.bitrate = BitratePolicy::selectBitrate(m_Preferences->useWifiBitrate,
+                                                         activeAddressRoute,
+                                                         m_StreamConfig.bitrate,
+                                                         m_Preferences->wifiBitrateKbps);
+
+    bool usingWifiBitrate = false;
     if (m_Preferences->useWifiBitrate) {
         if (activeAddressRoute.networkType == NvComputer::NetworkType::NT_ETHERNET &&
                 activeAddressRoute.reachability != NvComputer::ReachabilityType::RI_VPN) {
@@ -1665,7 +1700,7 @@ bool Session::startConnectionAsync()
                         "Ethernet route detected; using configured Ethernet bitrate");
         }
         else {
-            m_StreamConfig.bitrate = m_Preferences->wifiBitrateKbps;
+            usingWifiBitrate = true;
 
             if (activeAddressRoute.networkType == NvComputer::NetworkType::NT_WIFI) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
@@ -1716,22 +1751,17 @@ bool Session::startConnectionAsync()
         }
     }
 
-    // If the user has chosen YUV444 without adjusting the bitrate but the host doesn't
-    // support YUV444 streaming, use the default non-444 bitrate for the stream instead.
-    // This should provide equivalent image quality for YUV420 as the stream would have
-    // had if the host supported YUV444 (though obviously with 4:2:0 subsampling).
-    // If the user has adjusted the bitrate from default, we'll assume they really wanted
-    // that value and not second guess them.
-    if (m_Preferences->enableYUV444 &&
-        !(m_StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_YUV444) &&
-        m_StreamConfig.bitrate == StreamingPreferences::getDefaultBitrate(m_StreamConfig.width,
-                                                                          m_StreamConfig.height,
-                                                                          m_StreamConfig.fps,
-                                                                          true)) {
-        m_StreamConfig.bitrate = StreamingPreferences::getDefaultBitrate(m_StreamConfig.width,
-                                                                         m_StreamConfig.height,
-                                                                         m_StreamConfig.fps,
-                                                                         false);
+    // Recalculate the automatic primary rate when the host falls back to 4:2:0.
+    // Explicit primary and Wi-Fi presets must retain their configured values.
+    if (m_Preferences->autoAdjustBitrate && !usingWifiBitrate &&
+        m_Preferences->enableYUV444 &&
+        !(m_StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_YUV444)) {
+        m_StreamConfig.bitrate = BitratePolicy::clampAutomaticBitrate(
+            StreamingPreferences::getDefaultBitrate(m_StreamConfig.width,
+                                                    m_StreamConfig.height,
+                                                    m_StreamConfig.fps,
+                                                    false),
+            m_Preferences->unlockBitrate);
     }
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,

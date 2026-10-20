@@ -14,6 +14,8 @@
 #define SER_WIDTH "width"
 #define SER_HEIGHT "height"
 #define SER_FPS "fps"
+#define SER_NATIVE_RESOLUTION "nativeresolution"
+#define SER_NATIVE_FPS "nativefps"
 #define SER_BITRATE "bitrate"
 #define SER_WIFI_BITRATE "wifibitrate"
 #define SER_USE_WIFI_BITRATE "usewifibitrate"
@@ -127,6 +129,8 @@ void StreamingPreferences::reload()
     width = settings.value(SER_WIDTH, 1920).toInt();
     height = settings.value(SER_HEIGHT, 1080).toInt();
     fps = settings.value(SER_FPS, 60).toInt();
+    nativeResolution = settings.value(SER_NATIVE_RESOLUTION, false).toBool();
+    nativeFps = settings.value(SER_NATIVE_FPS, false).toBool();
     enableYUV444 = settings.value(SER_YUV444, false).toBool();
     bitrateKbps = settings.value(SER_BITRATE, getDefaultBitrate(width, height, fps, enableYUV444)).toInt();
     wifiBitrateKbps = settings.value(SER_WIFI_BITRATE, qMin(bitrateKbps, 20000)).toInt();
@@ -330,6 +334,8 @@ void StreamingPreferences::save()
     settings.setValue(SER_WIDTH, width);
     settings.setValue(SER_HEIGHT, height);
     settings.setValue(SER_FPS, fps);
+    settings.setValue(SER_NATIVE_RESOLUTION, nativeResolution);
+    settings.setValue(SER_NATIVE_FPS, nativeFps);
     settings.setValue(SER_BITRATE, bitrateKbps);
     settings.setValue(SER_WIFI_BITRATE, wifiBitrateKbps);
     settings.setValue(SER_USE_WIFI_BITRATE, useWifiBitrate);

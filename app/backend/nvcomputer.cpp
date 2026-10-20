@@ -378,91 +378,64 @@ NvComputer::ActiveAddressRoute NvComputer::getActiveAddressRoute() const
         Q_ASSERT(!s.localAddress().isNull());
         Q_ASSERT(!s.peerAddress().isNull());
 
+        QList<BitratePolicy::InterfaceRoute> routes;
         const auto allInterfaces = QNetworkInterface::allInterfaces();
+        routes.reserve(allInterfaces.size());
+        bool matchedInterface = false;
         for (const QNetworkInterface& nic : allInterfaces) {
-            // Ensure the interface is up
-            if ((nic.flags() & QNetworkInterface::IsUp) == 0) {
-                continue;
-            }
-
-            const auto allInterfaceAddresses = nic.addressEntries();
-            for (const QNetworkAddressEntry& addr : allInterfaceAddresses) {
-                if (addr.ip() == s.localAddress()) {
-                    qInfo() << "Found matching interface:" << nic.humanReadableName() << nic.hardwareAddress() << nic.flags();
-
-                    NetworkType networkType = NetworkType::NT_UNKNOWN;
+            BitratePolicy::InterfaceRoute route;
+            route.flags = nic.flags();
+            route.hardwareAddress = nic.hardwareAddress();
+            route.humanReadableName = nic.humanReadableName();
+            route.addresses = nic.addressEntries();
 
 #if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
-                    qInfo() << "Interface Type:" << nic.type();
-                    qInfo() << "Interface MTU:" << nic.maximumTransmissionUnit();
-
-                    if (nic.type() == QNetworkInterface::Ethernet) {
-                        networkType = NetworkType::NT_ETHERNET;
-                    }
-                    else if (nic.type() == QNetworkInterface::Wifi) {
-                        networkType = NetworkType::NT_WIFI;
-                    }
-
-                    if (nic.type() == QNetworkInterface::Virtual ||
-                            nic.type() == QNetworkInterface::Ppp) {
-                        // Treat PPP and virtual interfaces as likely VPNs
-                        return {ReachabilityType::RI_VPN, networkType};
-                    }
-
-                    if (nic.maximumTransmissionUnit() != 0 && nic.maximumTransmissionUnit() < 1500) {
-                        // Treat MTUs under 1500 as likely VPNs
-                        return {ReachabilityType::RI_VPN, networkType};
-                    }
+            switch (nic.type()) {
+            case QNetworkInterface::Ethernet:
+                route.type = BitratePolicy::InterfaceType::Ethernet;
+                break;
+            case QNetworkInterface::Wifi:
+                route.type = BitratePolicy::InterfaceType::Wifi;
+                break;
+            case QNetworkInterface::Virtual:
+                route.type = BitratePolicy::InterfaceType::Virtual;
+                break;
+            case QNetworkInterface::Ppp:
+                route.type = BitratePolicy::InterfaceType::Ppp;
+                break;
+            default:
+                break;
+            }
+            route.mtu = nic.maximumTransmissionUnit();
 #endif
-
-                    if (nic.flags() & QNetworkInterface::IsPointToPoint) {
-                        // Treat point-to-point links as likely VPNs.
-                        // This check detects OpenVPN on Unix-like OSes.
-                        return {ReachabilityType::RI_VPN, networkType};
-                    }
 
 #ifdef Q_OS_WINDOWS
-                    if (nic.name().startsWith("iftype53_") || nic.name().startsWith("iftype131_")) {
-                        // Match by NDIS interface type. These values are Microsoft's recommended values for VPN connections:
-                        // https://learn.microsoft.com/en-US/troubleshoot/windows-client/networking/windows-connection-manager-disconnects-wlan#more-information
-                        //
-                        // The following VPNs use IF_TYPE_PROP_VIRTUAL under Windows:
-                        //  - WireguardNT VPNs
-                        //  - All WinTun-based VPNs (such as Slack Nebula)
-                        //  - OpenVPN with tap-windows6
-                        return {ReachabilityType::RI_VPN, networkType};
-                    }
+            // NDIS IF_TYPE_PROP_VIRTUAL and IF_TYPE_TUNNEL include common VPNs.
+            route.platformVpnType = nic.name().startsWith("iftype53_") ||
+                                    nic.name().startsWith("iftype131_");
 #endif
 
-                    if (nic.hardwareAddress().startsWith("00:FF", Qt::CaseInsensitive)) {
-                        // OpenVPN TAP interfaces have a MAC address starting with 00:FF on Windows
-                        return {ReachabilityType::RI_VPN, networkType};
+            if (!matchedInterface && (route.flags & QNetworkInterface::IsUp)) {
+                for (const auto& address : route.addresses) {
+                    if (address.ip() == s.localAddress()) {
+                        qInfo() << "Found matching interface:" << nic.humanReadableName()
+                                << nic.hardwareAddress() << nic.flags();
+#if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
+                        qInfo() << "Interface Type:" << nic.type();
+                        qInfo() << "Interface MTU:" << nic.maximumTransmissionUnit();
+#endif
+                        matchedInterface = true;
+                        break;
                     }
-
-                    if (nic.humanReadableName().startsWith("ZeroTier")) {
-                        // ZeroTier interfaces always start with "ZeroTier"
-                        return {ReachabilityType::RI_VPN, networkType};
-                    }
-
-                    if (nic.humanReadableName().contains("VPN")) {
-                        // This one is just a final VPN heuristic if all else fails
-                        return {ReachabilityType::RI_VPN, networkType};
-                    }
-
-                    // Didn't meet any of our VPN heuristics. Let's see if the peer address is on-link.
-                    Q_ASSERT(addr.prefixLength() >= 0);
-                    if (addr.prefixLength() >= 0 && s.localAddress().isInSubnet(s.peerAddress(), addr.prefixLength())) {
-                        return {ReachabilityType::RI_LAN, networkType};
-                    }
-
-                    // Default to unknown if nothing else matched
-                    return {ReachabilityType::RI_UNKNOWN, networkType};
                 }
             }
+            routes.append(route);
         }
 
-        qWarning() << "No match found for address:" << s.localAddress();
-        return {ReachabilityType::RI_UNKNOWN, NetworkType::NT_UNKNOWN};
+        if (!matchedInterface) {
+            qWarning() << "No match found for address:" << s.localAddress();
+        }
+        return BitratePolicy::classifyRoute(s.localAddress(), s.peerAddress(), routes);
     }
     else {
         // If we fail to connect, just pretend that it's not a VPN

@@ -346,8 +346,10 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     parser.addFlagOption("1440", "2560x1440 resolution");
     parser.addFlagOption("4K", "3840x2160 resolution");
     parser.addValueOption("resolution", "custom <width>x<height> resolution");
+    parser.addFlagOption("native-resolution", "the active display's native resolution at stream start");
     parser.addToggleOption("vsync", "V-Sync");
     parser.addValueOption("fps", "FPS");
+    parser.addFlagOption("native-fps", "the active display's refresh rate at stream start");
     parser.addValueOption("bitrate", "bitrate in Kbps");
     parser.addValueOption("wifi-bitrate", "bitrate in Kbps for Wi-Fi and other non-Ethernet connections");
     parser.addValueOption("packet-size", "video packet size");
@@ -380,11 +382,12 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     parser.handleUnknownOptions();
 
     // Resolve display's width and height
-    static QRegularExpression resolutionRexExp("^(720|1080|1440|4K|resolution)$");
+    static QRegularExpression resolutionRexExp("^(720|1080|1440|4K|resolution|native-resolution)$");
     QStringList resoOptions = parser.optionNames().filter(resolutionRexExp);
     bool displaySet = !resoOptions.isEmpty();
     if (displaySet) {
         QString name = resoOptions.last();
+        preferences->nativeResolution = name == "native-resolution";
         if (name == "720") {
             preferences->width  = 1280;
             preferences->height = 720;
@@ -405,7 +408,11 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     }
 
     // Resolve --fps option
-    if (parser.isSet("fps")) {
+    const QStringList fpsOptions = parser.optionNames().filter(QRegularExpression("^(fps|native-fps)$"));
+    if (!fpsOptions.isEmpty()) {
+        preferences->nativeFps = fpsOptions.last() == "native-fps";
+    }
+    if (!fpsOptions.isEmpty() && !preferences->nativeFps) {
         preferences->fps = parser.getIntOption("fps");
         if (!inRange(preferences->fps, 10, 480)) {
             fprintf(stderr, "Warning: FPS is out of the supported range (10 - 480 FPS). Performance may suffer!\n");
@@ -422,7 +429,8 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
         // An explicit fixed bitrate should take precedence over the saved
         // network-aware setting unless --wifi-bitrate is also provided.
         preferences->useWifiBitrate = false;
-    } else if (displaySet || parser.isSet("fps")) {
+        preferences->autoAdjustBitrate = false;
+    } else if ((displaySet || !fpsOptions.isEmpty()) && preferences->autoAdjustBitrate) {
         preferences->bitrateKbps = preferences->getDefaultBitrate(
             preferences->width, preferences->height, preferences->fps, preferences->enableYUV444);
     }

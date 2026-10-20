@@ -122,6 +122,8 @@ public:
     Q_PROPERTY(int width MEMBER width NOTIFY displayModeChanged)
     Q_PROPERTY(int height MEMBER height NOTIFY displayModeChanged)
     Q_PROPERTY(int fps MEMBER fps NOTIFY displayModeChanged)
+    Q_PROPERTY(bool nativeResolution MEMBER nativeResolution NOTIFY displayModeChanged)
+    Q_PROPERTY(bool nativeFps MEMBER nativeFps NOTIFY displayModeChanged)
     Q_PROPERTY(int bitrateKbps MEMBER bitrateKbps NOTIFY bitrateChanged)
     Q_PROPERTY(int wifiBitrateKbps MEMBER wifiBitrateKbps NOTIFY wifiBitrateChanged)
     Q_PROPERTY(bool useWifiBitrate MEMBER useWifiBitrate NOTIFY useWifiBitrateChanged)
@@ -166,6 +168,8 @@ public:
     int width;
     int height;
     int fps;
+    bool nativeResolution;
+    bool nativeFps;
     int bitrateKbps;
     int wifiBitrateKbps;
     bool useWifiBitrate;

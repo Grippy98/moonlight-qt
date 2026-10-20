@@ -165,6 +165,8 @@ private:
     void getWindowDimensions(int& x, int& y,
                              int& width, int& height);
 
+    int getDisplayIndex();
+
     void toggleFullscreen();
 
     void notifyMouseEmulationMode(bool enabled);

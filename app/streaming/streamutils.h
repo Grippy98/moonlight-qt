@@ -1,6 +1,9 @@
 #pragma once
 
 #include "SDL_compat.h"
+#include "nativedisplaymode.h"
+
+class QScreen;
 
 class StreamUtils
 {
@@ -22,6 +25,9 @@ public:
 
     static
     bool getNativeDesktopMode(int displayIndex, SDL_DisplayMode* mode, SDL_Rect* safeArea);
+
+    static
+    NativeDisplay::Mode getCurrentNativeMode(int displayIndex, QScreen* screen);
 
     static
     int getDisplayRefreshRate(SDL_Window* window);

@@ -1,0 +1,26 @@
+name: OXP3 display and bitrate policies
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  policies:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install Qt test dependencies
+        run: sudo apt-get update && sudo apt-get install -y qt6-base-dev
+      - name: Native display selection and fractional refresh
+        run: bash tests/run-native-display-tests.sh
+      - name: Network route and bitrate presets
+        run: bash tests/run-bitrate-tests.sh
+      - name: Private preview profile and launcher
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 tests/test-preview-launcher.py -v
+
+# Intel DMA-BUF import, dock transitions and HDR display output require hardware.
