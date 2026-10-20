@@ -10,6 +10,15 @@ unix:!macx {
 
 include(../globaldefs.pri)
 
+# Optional, version-checked headers prepared by contrib/intel-packed-yuv444.
+packed_yuv444_headers = $$(MOONLIGHT_INTEL_PACKED_YUV444_HEADERS)
+!isEmpty(packed_yuv444_headers) {
+    !linux:error("The packed VAAPI 4:4:4 prototype is Linux-only")
+    !exists($$packed_yuv444_headers/libplacebo/utils/libav_internal.h):error("Missing private libplacebo headers")
+    INCLUDEPATH = $$packed_yuv444_headers $$INCLUDEPATH
+    message("Using private Intel packed 4:4:4 headers: $$packed_yuv444_headers")
+}
+
 # Precompile QML files to avoid writing qmlcache on portable versions.
 # Since this binds the app against the Qt runtime version, we will only
 # do this for Windows and Mac (when disable-prebuilts is not defined),
@@ -217,6 +226,7 @@ HEADERS += \
     backend/computerseeker.h \
     backend/identitymanager.h \
     backend/nvcomputer.h \
+    backend/bitratepolicy.h \
     backend/nvhttp.h \
     backend/nvpairingmanager.h \
     backend/computermanager.h \
@@ -236,6 +246,7 @@ HEADERS += \
     streaming/video/decoder.h \
     streaming/bandwidth.h \
     streaming/streamutils.h \
+    streaming/nativedisplaymode.h \
     backend/autoupdatechecker.h \
     path.h \
     settings/mappingmanager.h \

@@ -2,6 +2,7 @@
 
 #include "nvhttp.h"
 #include "nvaddress.h"
+#include "bitratepolicy.h"
 
 #include <QThread>
 #include <QReadWriteLock>
@@ -53,12 +54,18 @@ public:
     bool
     wake() const;
 
-    enum ReachabilityType
-    {
-        RI_UNKNOWN,
-        RI_LAN,
-        RI_VPN,
-    };
+    using ReachabilityType = BitratePolicy::ReachabilityType;
+    using NetworkType = BitratePolicy::NetworkType;
+    using ActiveAddressRoute = BitratePolicy::ActiveAddressRoute;
+    static constexpr auto RI_UNKNOWN = ReachabilityType::RI_UNKNOWN;
+    static constexpr auto RI_LAN = ReachabilityType::RI_LAN;
+    static constexpr auto RI_VPN = ReachabilityType::RI_VPN;
+    static constexpr auto NT_UNKNOWN = NetworkType::NT_UNKNOWN;
+    static constexpr auto NT_ETHERNET = NetworkType::NT_ETHERNET;
+    static constexpr auto NT_WIFI = NetworkType::NT_WIFI;
+
+    ActiveAddressRoute
+    getActiveAddressRoute() const;
 
     ReachabilityType
     getActiveAddressReachability() const;

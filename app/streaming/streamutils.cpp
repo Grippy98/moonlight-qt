@@ -2,6 +2,12 @@
 
 #include <Qt>
 #include <QDir>
+#include <QScreen>
+
+#ifdef HAVE_DRM
+#include <xf86drm.h>
+#include <xf86drmMode.h>
+#endif
 
 #ifdef Q_OS_DARWIN
 #include <ApplicationServices/ApplicationServices.h>
@@ -254,6 +260,142 @@ bool StreamUtils::hasFastAes()
     #warning Unknown 64-bit platform. Assuming AES is fast on this CPU.
     return true;
 #endif
+}
+
+NativeDisplay::Mode StreamUtils::getCurrentNativeMode(int displayIndex, QScreen* screen)
+{
+    NativeDisplay::Mode mode;
+    SDL_DisplayMode desktop;
+    if (SDL_GetCurrentDisplayMode(displayIndex, &desktop) == 0) {
+        mode = {desktop.w, desktop.h, static_cast<double>(desktop.refresh_rate)};
+    }
+
+    if (screen != nullptr) {
+        // QScreen geometry is logical on scaled desktops. Device pixel ratio
+        // converts it to pixels without choosing a different display mode.
+        const auto geometry = screen->geometry();
+        const auto scale = screen->devicePixelRatio();
+        NativeDisplay::Mode qtMode = {qRound(geometry.width() * scale),
+                                     qRound(geometry.height() * scale),
+                                     screen->refreshRate()};
+        if (NativeDisplay::validResolution(qtMode)) {
+            mode.width = qtMode.width;
+            mode.height = qtMode.height;
+        }
+        if (NativeDisplay::streamFrameRate(qtMode.refreshRate) != 0) {
+            mode.refreshRate = qtMode.refreshRate;
+        }
+    }
+
+#if defined(Q_OS_LINUX) && defined(HAVE_DRM)
+    // Gamescope can expose a game-sized virtual display to both Qt and SDL.
+    // A single active physical output is unambiguous; connected but disabled
+    // panels and other available display modes must not affect selection.
+    const bool gamescope = !qEnvironmentVariableIsEmpty("GAMESCOPE_WAYLAND_DISPLAY") ||
+            qEnvironmentVariable("XDG_CURRENT_DESKTOP").split(':').contains("gamescope", Qt::CaseInsensitive) ||
+            qEnvironmentVariable("XDG_SESSION_DESKTOP").compare("gamescope", Qt::CaseInsensitive) == 0;
+    if (gamescope) {
+        std::vector<NativeDisplay::Output> outputs;
+        bool complete = true;
+        QDir driDir("/dev/dri");
+        driDir.setFilter(QDir::Files | QDir::System);
+        for (const auto& node : driDir.entryInfoList(QStringList("card*"))) {
+            int fd = open(node.absoluteFilePath().toUtf8().constData(), O_RDONLY | O_CLOEXEC);
+            if (fd < 0) {
+                complete = false;
+                continue;
+            }
+            // ACTIVE is an atomic property, hidden from legacy clients.
+            if (drmSetClientCap(fd, DRM_CLIENT_CAP_ATOMIC, 1) != 0) {
+                complete = false;
+                close(fd);
+                continue;
+            }
+            drmModeRes* resources = drmModeGetResources(fd);
+            if (resources != nullptr) {
+                for (int i = 0; i < resources->count_connectors; i++) {
+                    drmModeConnector* connector = drmModeGetConnector(fd, resources->connectors[i]);
+                    if (connector == nullptr) {
+                        complete = false;
+                        continue;
+                    }
+                    if (connector->connection == DRM_MODE_CONNECTED && connector->encoder_id != 0) {
+                        drmModeEncoder* encoder = drmModeGetEncoder(fd, connector->encoder_id);
+                        if (encoder != nullptr) {
+                            drmModeCrtc* crtc = encoder->crtc_id == 0 ? nullptr : drmModeGetCrtc(fd, encoder->crtc_id);
+                            if (crtc != nullptr) {
+                                bool active = false;
+                                bool activeRead = false;
+                                auto properties = drmModeObjectGetProperties(fd, crtc->crtc_id, DRM_MODE_OBJECT_CRTC);
+                                if (properties != nullptr) {
+                                    for (uint32_t p = 0; p < properties->count_props; p++) {
+                                        auto property = drmModeGetProperty(fd, properties->props[p]);
+                                        if (property != nullptr) {
+                                            if (!strcmp(property->name, "ACTIVE")) {
+                                                active = properties->prop_values[p] != 0;
+                                                activeRead = true;
+                                            }
+                                            drmModeFreeProperty(property);
+                                        }
+                                        else {
+                                            complete = false;
+                                        }
+                                    }
+                                    drmModeFreeObjectProperties(properties);
+                                }
+                                if (!activeRead) {
+                                    complete = false;
+                                }
+                                if (active && crtc->mode_valid) {
+                                    const auto& timing = crtc->mode;
+                                    outputs.push_back({true, true,
+                                                       {timing.hdisplay, timing.vdisplay,
+                                                        NativeDisplay::timingRefreshRate(timing.clock, timing.htotal,
+                                                                                        timing.vtotal,
+                                                                                        timing.flags & DRM_MODE_FLAG_INTERLACE,
+                                                                                        timing.flags & DRM_MODE_FLAG_DBLSCAN,
+                                                                                        timing.vscan)}});
+                                }
+                                else if (active) {
+                                    complete = false;
+                                }
+                                drmModeFreeCrtc(crtc);
+                            }
+                            if (crtc == nullptr && encoder->crtc_id != 0) {
+                                complete = false;
+                            }
+                            drmModeFreeEncoder(encoder);
+                        }
+                        else {
+                            complete = false;
+                        }
+                    }
+                    drmModeFreeConnector(connector);
+                }
+                drmModeFreeResources(resources);
+            }
+            else {
+                complete = false;
+            }
+            close(fd);
+        }
+        NativeDisplay::Mode physical;
+        if (complete && NativeDisplay::selectPhysicalMode(outputs, physical)) {
+            mode = physical;
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "Native display: Gamescope physical output %dx%d at %.3f Hz",
+                        mode.width, mode.height, mode.refreshRate);
+            return mode;
+        }
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Native display: no unambiguous readable Gamescope output; using selected desktop display");
+    }
+#endif
+
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "Native display: selected desktop display %d, %dx%d at %.3f Hz",
+                displayIndex, mode.width, mode.height, mode.refreshRate);
+    return mode;
 }
 
 bool StreamUtils::getNativeDesktopMode(int displayIndex, SDL_DisplayMode* mode, SDL_Rect* safeArea)

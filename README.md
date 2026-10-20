@@ -20,6 +20,17 @@ You can follow development on our [Discord server](https://moonlight-stream.org/
  - Gamepad support with force feedback and motion controls for up to 16 players
  - Support for both pointer capture (for games) and direct mouse control (for remote desktop)
  - Support for passing system-wide keyboard shortcuts like Alt+Tab to the host
+
+### CachyOS / Intel OXP3 preview
+
+This fork adds display-following **Native resolution and FPS**, preserves the
+network-aware **Wi-Fi/Ethernet bitrate** controls, and includes an optional Intel
+HEVC HDR/4:4:4 import prototype. A native build and private-profile launcher allow
+comparison with the installed Moonlight Flatpak.
+
+See the [CachyOS build, usage and rollback guide](docs/oxp3-cachyos.md). The packed
+4:4:4 import is experimental; its offscreen hardware checks do not establish HDR
+display output or full-resolution streaming performance.
  
 ## Downloads
 - [Windows, macOS, and Steam Link](https://github.com/moonlight-stream/moonlight-qt/releases)
