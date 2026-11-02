@@ -1,0 +1,107 @@
+diff --git a/src/include/libplacebo/utils/libav_internal.h b/src/include/libplacebo/utils/libav_internal.h
+index 13a21d2..015e151 100644
+--- a/src/include/libplacebo/utils/libav_internal.h
++++ b/src/include/libplacebo/utils/libav_internal.h
+@@ -1040,6 +1040,40 @@ static void pl_fix_hwframe_sample_depth(struct pl_frame *out)
+     bits->sample_depth = fmt->component_depth[0];
+ }
+ 
++struct pl_drm_packed_yuv_layout {
++    const char *format;
++    int depth;
++    int component_mapping[4];
++};
++
++static bool pl_get_drm_packed_yuv_layout(uint32_t fourcc,
++                                        struct pl_drm_packed_yuv_layout *layout)
++{
++    switch (fourcc) {
++    case MKTAG('X', 'Y', 'U', 'V'):
++        // XYUV8888 stores Cr, Cb, Y, X from low to high byte. Sampling it
++        // as BGRA8 exposes Y, Cb, Cr without performing RGB conversion.
++        // The component map follows host storage order; the renderer also
++        // applies BGRA8's sample_order when assigning the sampled channels.
++        *layout = (struct pl_drm_packed_yuv_layout) {
++            .format = "bgra8", .depth = 8,
++            .component_mapping = {2, 1, 0, PL_CHANNEL_NONE},
++        };
++        return true;
++    case MKTAG('Y', '4', '1', '0'):
++    case MKTAG('X', 'V', '3', '0'):
++        // Y410/XVYU2101010 has Cb, Y, Cr in the low three 10-bit fields.
++        // RGB10A2 preserves those fields; the last two bits are ignored.
++        *layout = (struct pl_drm_packed_yuv_layout) {
++            .format = "rgb10a2", .depth = 10,
++            .component_mapping = {1, 0, 2, PL_CHANNEL_NONE},
++        };
++        return true;
++    default:
++        return false;
++    }
++}
++
+ static bool pl_map_avframe_drm(pl_gpu gpu, struct pl_frame *out,
+                                const AVFrame *frame)
+ {
+@@ -1050,12 +1084,41 @@ static bool pl_map_avframe_drm(pl_gpu gpu, struct pl_frame *out,
+     if (!(gpu->import_caps.tex & PL_HANDLE_DMA_BUF) || !out->num_planes)
+         return false;
+ 
++    struct pl_drm_packed_yuv_layout packed = {0};
++    // Vulkan imports DMA-BUF storage using a VkFormat and a DRM modifier;
++    // unlike EGL, it does not receive the source FourCC. Reinterpret these
++    // packed YUV words through a bit-identical RGB texture format, retaining
++    // the YUV color representation and applying the component map below.
++    if (drm->nb_layers > 0 &&
++        pl_get_drm_packed_yuv_layout(drm->layers[0].format, &packed))
++    {
++        if (drm->nb_layers != 1 || drm->layers[0].nb_planes != 1)
++            return false;
++#ifdef PL_HAVE_LAV_VULKAN
++        if (!pl_vulkan_get(gpu))
++            return false;
++#else
++        return false;
++#endif
++        if (!desc || desc->nb_components != 3 || desc->log2_chroma_w ||
++            desc->log2_chroma_h ||
++            (desc->flags & (AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_BE)) ||
++            frame->width <= 0 || drm->layers[0].planes[0].pitch / 4 < frame->width)
++            return false;
++        for (int c = 0; c < 3; c++) {
++            if (desc->comp[c].depth != packed.depth)
++                return false;
++        }
++        out->num_planes = 1;
++    }
++
+     assert(drm->nb_layers >= out->num_planes);
+     for (int n = 0; n < out->num_planes; n++) {
+         const AVDRMLayerDescriptor *layer = &drm->layers[n];
+         const AVDRMPlaneDescriptor *plane = &layer->planes[0];
+         const AVDRMObjectDescriptor *object = &drm->objects[plane->object_index];
+-        pl_fmt fmt = pl_find_fourcc(gpu, layer->format);
++        pl_fmt fmt = packed.format ? pl_find_named_fmt(gpu, packed.format) :
++                                    pl_find_fourcc(gpu, layer->format);
+         bool is_chroma = n == 1 || n == 2;
+         if (!fmt || !pl_fmt_has_modifier(fmt, object->format_modifier))
+             return false;
+@@ -1083,6 +1146,18 @@ static bool pl_map_avframe_drm(pl_gpu gpu, struct pl_frame *out,
+ 
+     pl_fix_hwframe_sample_depth(out);
+ 
++    if (packed.format) {
++        out->planes[0].components = 3;
++        memcpy(out->planes[0].component_mapping, packed.component_mapping,
++               sizeof(packed.component_mapping));
++        out->repr.alpha = PL_ALPHA_NONE;
++        out->repr.bits = (struct pl_bit_encoding) {
++            .sample_depth = packed.depth,
++            .color_depth = packed.depth,
++        };
++        return true;
++    }
++
+     switch (hwfc->sw_format) {
+     case AV_PIX_FMT_P010: out->repr.bits.bit_shift = 6; break;
+     default: break;

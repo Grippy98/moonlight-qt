@@ -164,9 +164,13 @@ public:
     Q_PROPERTY(int width MEMBER width NOTIFY displayModeChanged)
     Q_PROPERTY(int height MEMBER height NOTIFY displayModeChanged)
     Q_PROPERTY(int fps MEMBER fps NOTIFY displayModeChanged)
+    Q_PROPERTY(bool nativeResolution MEMBER nativeResolution NOTIFY displayModeChanged)
+    Q_PROPERTY(bool nativeFps MEMBER nativeFps NOTIFY displayModeChanged)
     Q_PROPERTY(int bitrateKbps MEMBER bitrateKbps NOTIFY bitrateChanged)
     // Calibrated PyroWave frame pace (0 = let the host choose); see PyroWaveLink::searchPace.
     Q_PROPERTY(int pyroWavePaceMbps MEMBER pyroWavePaceMbps NOTIFY bitrateChanged)
+    Q_PROPERTY(int wifiBitrateKbps MEMBER wifiBitrateKbps NOTIFY wifiBitrateChanged)
+    Q_PROPERTY(bool useWifiBitrate MEMBER useWifiBitrate NOTIFY useWifiBitrateChanged)
     Q_PROPERTY(bool unlockBitrate MEMBER unlockBitrate NOTIFY unlockBitrateChanged)
     Q_PROPERTY(bool autoAdjustBitrate MEMBER autoAdjustBitrate NOTIFY autoAdjustBitrateChanged)
     Q_PROPERTY(bool enableVsync MEMBER enableVsync NOTIFY enableVsyncChanged)
@@ -238,7 +242,11 @@ public:
     int width;
     int height;
     int fps;
+    bool nativeResolution;
+    bool nativeFps;
     int bitrateKbps;
+    int wifiBitrateKbps;
+    bool useWifiBitrate;
     bool unlockBitrate;
     bool autoAdjustBitrate;
     bool enableVsync;
@@ -306,6 +314,8 @@ private:
 signals:
     void displayModeChanged();
     void bitrateChanged();
+    void wifiBitrateChanged();
+    void useWifiBitrateChanged();
     void unlockBitrateChanged();
     void autoAdjustBitrateChanged();
     void enableVsyncChanged();

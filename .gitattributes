@@ -1,0 +1,2 @@
+# Unified-diff context contains required single-space blank lines.
+contrib/intel-packed-yuv444/patches/*.patch -whitespace

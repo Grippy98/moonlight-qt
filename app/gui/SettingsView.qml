@@ -217,6 +217,14 @@ Flickable {
                                 }
                             }
 
+                            resolutionListModel.insert(0, {
+                                                           "text": qsTr("Native (Follow display)"),
+                                                           "video_width": "0",
+                                                           "video_height": "0",
+                                                           "is_custom": false,
+                                                           "is_native": true
+                                                       })
+
                             // load the saved width/height, and iterate through the ComboBox until a match is found
                             // and set it to that index.
                             var saved_width = StreamingPreferences.width
@@ -250,6 +258,10 @@ Flickable {
                                                                "video_height": "",
                                                                "is_custom": true
                                                            })
+                            }
+
+                            if (StreamingPreferences.nativeResolution) {
+                                currentIndex = 0
                             }
 
                             // Since we don't call activate() here, we need to trigger
@@ -293,6 +305,11 @@ Flickable {
                         }
 
                         function updateBitrateForSelection() {
+                            StreamingPreferences.nativeResolution = !!resolutionListModel.get(currentIndex).is_native
+                            if (StreamingPreferences.nativeResolution) {
+                                lastIndexValue = currentIndex
+                                return
+                            }
                             var selectedWidth = parseInt(resolutionListModel.get(currentIndex).video_width)
                             var selectedHeight = parseInt(resolutionListModel.get(currentIndex).video_height)
 
@@ -461,6 +478,11 @@ Flickable {
                         property int lastIndexValue
 
                         function updateBitrateForSelection() {
+                            StreamingPreferences.nativeFps = !!model.get(currentIndex).is_native
+                            if (StreamingPreferences.nativeFps) {
+                                lastIndexValue = currentIndex
+                                return
+                            }
                             var selectedFps = parseInt(model.get(fpsComboBox.currentIndex).video_fps)
                             var fpsChanged = StreamingPreferences.fps !== selectedFps
                             StreamingPreferences.fps = selectedFps
@@ -594,6 +616,12 @@ Flickable {
                         function reinitialize() {
                             var choices = StreamingPreferences.getFpsChoices(getRefreshRates())
                             model.clear()
+                            model.append({
+                                             "text": qsTr("Native (Follow display)"),
+                                             "video_fps": "0",
+                                             "is_custom": false,
+                                             "is_native": true
+                                         })
                             var hasCustomChoice = false
 
                             for (var i = 0; i < choices.length; i++) {
@@ -602,7 +630,8 @@ Flickable {
                                 model.append({
                                                  "text": choiceText(choice),
                                                  "video_fps": choice.video_fps,
-                                                 "is_custom": choice.is_custom
+                                                 "is_custom": choice.is_custom,
+                                                 "is_native": false
                                              })
                             }
 
@@ -628,8 +657,13 @@ Flickable {
                                 model.append({
                                                  "text": qsTr("Custom"),
                                                  "video_fps": "",
-                                                 "is_custom": true
+                                                 "is_custom": true,
+                                                 "is_native": false
                                              })
+                            }
+
+                            if (StreamingPreferences.nativeFps) {
+                                currentIndex = 0
                             }
 
                             recalculateWidth()
@@ -660,6 +694,14 @@ Flickable {
                             }
                         }
                     }
+                }
+
+                Label {
+                    width: parent.width
+                    visible: StreamingPreferences.nativeResolution || StreamingPreferences.nativeFps
+                    text: qsTr("Native is detected when streaming starts. Reconnect after docking or undocking to use the new display.")
+                    font.pointSize: 9
+                    wrapMode: Text.Wrap
                 }
 
                 Label {
@@ -773,7 +815,11 @@ Flickable {
                 Label {
                     width: parent.width
                     id: bitrateTitle
-                    text: qsTr("Video bitrate:")
+                    text: StreamingPreferences.autoAdjustBitrate && (StreamingPreferences.nativeResolution || StreamingPreferences.nativeFps) ?
+                              (StreamingPreferences.useWifiBitrate ? qsTr("Ethernet video bitrate: Automatic") : qsTr("Video bitrate: Automatic")) :
+                              (StreamingPreferences.useWifiBitrate ?
+                                   qsTr("Ethernet video bitrate: %1 Mbps").arg(slider.value / 1000.0) :
+                                   qsTr("Video bitrate: %1 Mbps").arg(slider.value / 1000.0))
                     font.pointSize: 12
                     wrapMode: Text.Wrap
                 }
@@ -820,7 +866,6 @@ Flickable {
                         width: Math.min(bitrateDesc.implicitWidth, parent.width - (resetBitrateButton.visible ? resetBitrateButton.width + parent.spacing : 0))
 
                         onValueChanged: {
-                            bitrateTitle.text = qsTr("Video bitrate: %1 Mbps").arg(value / 1000.0)
                             StreamingPreferences.bitrateKbps = value
                         }
 
@@ -836,14 +881,70 @@ Flickable {
 
                     Button {
                         id: resetBitrateButton
-                        text: qsTr("Use Default (%1 Mbps)").arg(slider.defaultBitrate() / 1000.0)
-                        visible: StreamingPreferences.bitrateKbps !== slider.defaultBitrate()
+                        text: StreamingPreferences.nativeResolution || StreamingPreferences.nativeFps ? qsTr("Use automatic bitrate") :
+                                  qsTr("Use Default (%1 Mbps)").arg(slider.defaultBitrate() / 1000.0)
+                        visible: !StreamingPreferences.autoAdjustBitrate || StreamingPreferences.bitrateKbps !== slider.defaultBitrate()
                         onClicked: {
                             var defaultBitrate = slider.defaultBitrate()
                             StreamingPreferences.bitrateKbps = defaultBitrate
                             StreamingPreferences.autoAdjustBitrate = true
                             slider.value = defaultBitrate
                         }
+                    }
+                }
+
+                CheckBox {
+                    id: useWifiBitrate
+                    width: parent.width
+                    text: qsTr("Use a separate bitrate for Wi-Fi")
+                    font.pointSize: 12
+
+                    checked: StreamingPreferences.useWifiBitrate
+                    onCheckedChanged: {
+                        if (StreamingPreferences.useWifiBitrate !== checked) {
+                            StreamingPreferences.useWifiBitrate = checked
+                        }
+                    }
+
+                    ToolTip.delay: 1000
+                    ToolTip.timeout: 5000
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("The primary bitrate is used only when the route to the host is detected as Ethernet. Wi-Fi, VPN, and unknown connection types use the safer Wi-Fi bitrate.")
+                }
+
+                Label {
+                    width: parent.width
+                    id: wifiBitrateTitle
+                    text: qsTr("Wi-Fi video bitrate: %1 Mbps").arg(wifiBitrateSlider.value / 1000.0)
+                    font.pointSize: 12
+                    wrapMode: Text.Wrap
+                    visible: useWifiBitrate.checked
+                }
+
+                Label {
+                    width: parent.width
+                    id: wifiBitrateDesc
+                    text: qsTr("Used for Wi-Fi and whenever an Ethernet route cannot be confirmed.")
+                    font.pointSize: 9
+                    wrapMode: Text.Wrap
+                    visible: useWifiBitrate.checked
+                }
+
+                Slider {
+                    id: wifiBitrateSlider
+                    width: Math.min(wifiBitrateDesc.implicitWidth, parent.width)
+                    visible: useWifiBitrate.checked
+
+                    value: StreamingPreferences.wifiBitrateKbps
+
+                    stepSize: 500
+                    from: 500
+                    to: StreamingPreferences.unlockBitrate ? 500000 : 150000
+
+                    snapMode: "SnapOnRelease"
+
+                    onValueChanged: {
+                        StreamingPreferences.wifiBitrateKbps = value
                     }
                 }
 

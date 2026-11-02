@@ -130,7 +130,12 @@ The FPS picker is advisory and independent of the VRR setting. It offers fixed
 30 and 60 FPS, usable native display rates, and a plain below-refresh choice at
 `floor(refresh - refresh^2 / 3600)` (116 FPS at 120 Hz). A saved custom FPS
 remains selectable. Toggling VRR does not rewrite saved FPS;
-`m_StreamConfig.fps` receives the requested preference.
+`m_StreamConfig.fps` receives the requested preference. The OXP3 integration adds
+an independent Native choice for resolution and FPS. At connection startup it
+resolves the active physical display before presentation-policy snapshotting,
+without rewriting the saved fixed-mode fallbacks. Network-aware Wi-Fi/Ethernet
+bitrate presets are selected from the actual route to the host after contact;
+the native-display default retains PyroWave's codec-specific recommendation.
 
 `snapshotPresentationSettings()` resolves that request for the session:
 
